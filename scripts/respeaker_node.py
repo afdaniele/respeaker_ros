@@ -216,8 +216,9 @@ class RespeakerInterface(object):
 
 
 class RespeakerAudio(object):
-    def __init__(self, on_audio, channel=0):
+    def __init__(self, on_audio, on_raw_audio, channel=0):
         self.on_audio = on_audio
+        self.on_raw_audio = on_raw_audio
         with ignore_stderr(True):
             self.pyaudio = pyaudio.PyAudio()
         self.channels = None
@@ -282,6 +283,12 @@ class RespeakerAudio(object):
         chan_data = data[:, self.channel]
         # invoke callback
         self.on_audio(chan_data.tostring())
+        # publish raw data
+        if self.channels == 6:
+            for mic in range(1,5):
+                chan_data = data[:, mic]
+                self.on_raw_audio(chan_data.tostring(), mic)
+        # return
         return None, pyaudio.paContinue
 
     def start(self):
@@ -317,11 +324,22 @@ class RespeakerNode(object):
         self.pub_doa = rospy.Publisher("sound_localization", PoseStamped, queue_size=1, latch=True)
         self.pub_audio = rospy.Publisher("audio", AudioData, queue_size=10)
         self.pub_speech_audio = rospy.Publisher("speech_audio", AudioData, queue_size=10)
+        # raw audio
+        self.raw_audio_pubs = [ 'no_raw_mic_on_ch_0' ]
         # init config
         self.config = None
         self.dyn_srv = Server(RespeakerConfig, self.on_config)
+        # create device
+        self.respeaker_audio = RespeakerAudio(self.on_audio, self.on_raw_audio)
+        # create raw publishers
+        if self.respeaker_audio.channels == 6:
+            self.raw_audio_pubs += [
+                rospy.Publisher("raw_audio_mic1", AudioData, queue_size=10),
+                rospy.Publisher("raw_audio_mic2", AudioData, queue_size=10),
+                rospy.Publisher("raw_audio_mic3", AudioData, queue_size=10),
+                rospy.Publisher("raw_audio_mic4", AudioData, queue_size=10)
+            ]
         # start
-        self.respeaker_audio = RespeakerAudio(self.on_audio)
         self.speech_prefetch_bytes = int(
             self.speech_prefetch * self.respeaker_audio.rate * self.respeaker_audio.bitdepth / 8.0)
         self.speech_prefetch_buffer = str()
@@ -376,6 +394,10 @@ class RespeakerNode(object):
         else:
             self.speech_prefetch_buffer += data
             self.speech_prefetch_buffer = self.speech_prefetch_buffer[-self.speech_prefetch_bytes:]
+
+    def on_raw_audio(self, data, mic):
+        pub = self.raw_audio_pubs[mic]
+        pub.publish(AudioData(data=data))
 
     def on_timer(self, event):
         stamp = event.current_real or rospy.Time.now()
