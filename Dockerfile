@@ -1,4 +1,4 @@
-FROM afdaniele/libbot2-ros:latest
+FROM ripl/libbot2-ros:latest
 
 # set working directory
 RUN mkdir -p /code/src/respeaker_ros
